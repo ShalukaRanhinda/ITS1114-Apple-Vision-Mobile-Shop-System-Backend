@@ -19,5 +19,9 @@ public class Customer {
     @Enumerated(EnumType.STRING)
     private CustomerStatus customerStatus = CustomerStatus.ACTIVE;
 
+    @OneToOne(cascade = CascadeType.ALL)
+    @JoinColumn(name = "user_id", referencedColumnName = "userId")
+    private User user;
+
 
 }
