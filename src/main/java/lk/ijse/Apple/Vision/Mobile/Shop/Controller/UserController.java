@@ -1,7 +1,10 @@
 package lk.ijse.Apple.Vision.Mobile.Shop.Controller;
 
 import lk.ijse.Apple.Vision.Mobile.Shop.Constant.CommonResponse;
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.AuthDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.UserDTO;
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.UserDataDTO;
+import lk.ijse.Apple.Vision.Mobile.Shop.Security.JwtUtil;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.UserService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -17,9 +20,11 @@ import static lk.ijse.Apple.Vision.Mobile.Shop.Constant.ResponseStatusCode.OPERA
 public class UserController {
 
     private final UserService userService;
+    private final JwtUtil jwtUtil;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, JwtUtil jwtUtil) {
         this.userService = userService;
+        this.jwtUtil = jwtUtil;
     }
 
     @PostMapping(value = "/saveUser", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -50,5 +55,17 @@ public class UserController {
     public CommonResponse getUser(@PathVariable Long userId) {
         UserDTO userDTO = userService.getUserById(userId);
         return new CommonResponse(OPERATION_SUCCESS, userDTO, SUCCESS_MESSAGE);
+    }
+    @PostMapping(value = "/login",produces = MediaType.APPLICATION_JSON_VALUE)
+    public CommonResponse login(@RequestBody AuthDTO authDTO) {
+        UserDTO userDetails = userService.getUserDetails(authDTO.getUserName(), authDTO.getPassword());
+        System.out.println("Login API called for email : " + authDTO.getUserName());
+        String token = jwtUtil.generateToken(userDetails);
+
+        UserDataDTO userDataDTO = new UserDataDTO();
+        userDataDTO.setUserId(userDetails.getUserId());
+        userDataDTO.setToken(token);
+
+        return new CommonResponse(0, userDataDTO, "JWT Token");
     }
 }

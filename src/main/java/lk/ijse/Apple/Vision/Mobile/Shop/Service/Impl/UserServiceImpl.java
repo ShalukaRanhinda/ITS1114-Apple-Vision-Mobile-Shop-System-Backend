@@ -285,4 +285,49 @@ public class UserServiceImpl implements UserService {
         }
         return userDTO;
     }
+    @Override
+    public UserDTO getUserDetails(String userName, String password) {
+        log.info("Execute getUserDetails()");
+
+        if (userName == null || userName.trim().isEmpty()) {
+            throw new CustomException(400, "Username cannot be empty!");
+        }
+        if (password == null || password.trim().isEmpty()) {
+            throw new CustomException(400, "Password cannot be empty!");
+        }
+
+        User user = userRepository.findByUserName(userName.trim())
+                .orElseThrow(() -> new CustomException(404, "User not found with provided username!"));
+
+        if (user.getUserStatus() == UserStatus.DELETED) {
+            throw new CustomException(400, "User account is deleted or inactive!");
+        }
+
+
+        if (!user.getPassword().equals(password.trim())) {
+            throw new CustomException(401, "Invalid password provided!");
+        }
+
+        UserDTO userDTO = new UserDTO();
+        userDTO.setUserId(user.getUserId());
+        userDTO.setUserName(user.getUserName());
+        userDTO.setRole(user.getRole());
+        userDTO.setUserStatus(user.getUserStatus());
+
+        if (user.getRole() == UserRole.CUSTOMER && user.getCustomer() != null) {
+            Customer customer = user.getCustomer();
+            if (customer.getCustomerStatus() != CustomerStatus.DELETED) {
+                CustomerDTO customerDTO = new CustomerDTO();
+                customerDTO.setCustomerId(customer.getCustomerId());
+                customerDTO.setFullName(customer.getFullName());
+                customerDTO.setEmail(customer.getEmail());
+                customerDTO.setPhoneNumber(customer.getPhoneNumber());
+                customerDTO.setCustomerStatus(customer.getCustomerStatus());
+
+                userDTO.setCustomerDTO(customerDTO);
+            }
+        }
+
+        return userDTO;
+    }
 }
