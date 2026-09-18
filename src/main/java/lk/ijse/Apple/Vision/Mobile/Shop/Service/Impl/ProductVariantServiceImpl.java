@@ -4,13 +4,16 @@ import jakarta.transaction.Transactional;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.ProductVariantDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Product;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.ProductVariant;
+import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.ProductStatus;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.ProductVariantStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.ProductRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.ProductVariantRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.ProductVariantService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,10 +34,28 @@ public class ProductVariantServiceImpl implements ProductVariantService {
     public ProductVariantDTO saveProductVariant(ProductVariantDTO productVariantDTO) {
         log.info("Execute saveProductVariant()");
 
-        Product product = productRepository.findById(productVariantDTO.getProductId()).orElse(null);
+        if (productVariantDTO == null) {
+            throw new CustomException(400, "Product variant data cannot be null!");
+        }
+        if (productVariantDTO.getProductId() == null) {
+            throw new CustomException(400, "Product ID cannot be null!");
+        }
+        if (productVariantDTO.getVariantDescription() == null || productVariantDTO.getVariantDescription().trim().isEmpty()) {
+            throw new CustomException(400, "Variant description cannot be empty!");
+        }
+        if (productVariantDTO.getAdditionalPrice() == null || productVariantDTO.getAdditionalPrice().compareTo(BigDecimal.ZERO) < 0) {
+            throw new CustomException(400, "Additional price cannot be null or negative!");
+        }
+
+        Product product = productRepository.findById(productVariantDTO.getProductId())
+                .orElseThrow(() -> new CustomException(404, "Product not found with ID: " + productVariantDTO.getProductId()));
+
+        if (product.getProductStatus() == ProductStatus.DELETED) {
+            throw new CustomException(400, "Cannot add a variant to an inactive or deleted product!");
+        }
 
         ProductVariant variant = new ProductVariant();
-        variant.setVariantDescription(productVariantDTO.getVariantDescription());
+        variant.setVariantDescription(productVariantDTO.getVariantDescription().trim());
         variant.setAdditionalPrice(productVariantDTO.getAdditionalPrice());
         variant.setVariantStatus(ProductVariantStatus.ACTIVE);
         variant.setProduct(product);
@@ -51,19 +72,45 @@ public class ProductVariantServiceImpl implements ProductVariantService {
     public ProductVariantDTO updateProductVariant(ProductVariantDTO productVariantDTO) {
         log.info("Execute updateProductVariant()");
 
-        ProductVariant variant = productVariantRepository.findById(productVariantDTO.getVariantId()).orElse(new ProductVariant());
-        Product product = productRepository.findById(productVariantDTO.getProductId()).orElse(null);
+        if (productVariantDTO == null) {
+            throw new CustomException(400, "Product variant update data cannot be null!");
+        }
+        if (productVariantDTO.getVariantId() == null) {
+            throw new CustomException(400, "Product variant ID cannot be null for update!");
+        }
+        if (productVariantDTO.getVariantDescription() == null || productVariantDTO.getVariantDescription().trim().isEmpty()) {
+            throw new CustomException(400, "Variant description cannot be empty!");
+        }
+        if (productVariantDTO.getAdditionalPrice() == null || productVariantDTO.getAdditionalPrice().compareTo(BigDecimal.ZERO) < 0) {
+            throw new CustomException(400, "Additional price cannot be null or negative!");
+        }
 
-        variant.setVariantDescription(productVariantDTO.getVariantDescription());
+        ProductVariant variant = productVariantRepository.findById(productVariantDTO.getVariantId())
+                .orElseThrow(() -> new CustomException(404, "Product variant not found with ID: " + productVariantDTO.getVariantId()));
+
+        if (variant.getVariantStatus() == ProductVariantStatus.DELETED) {
+            throw new CustomException(400, "Cannot update a deleted product variant!");
+        }
+
+        if (productVariantDTO.getProductId() != null) {
+            Product product = productRepository.findById(productVariantDTO.getProductId())
+                    .orElseThrow(() -> new CustomException(404, "Product not found with ID: " + productVariantDTO.getProductId()));
+
+            if (product.getProductStatus() == ProductStatus.DELETED) {
+                throw new CustomException(400, "Cannot link variant to an inactive or deleted product!");
+            }
+            variant.setProduct(product);
+        }
+
+        variant.setVariantDescription(productVariantDTO.getVariantDescription().trim());
         variant.setAdditionalPrice(productVariantDTO.getAdditionalPrice());
-        variant.setProduct(product);
 
         if (productVariantDTO.getVariantStatus() != null) {
             variant.setVariantStatus(productVariantDTO.getVariantStatus());
         }
 
         ProductVariant updatedVariant = productVariantRepository.save(variant);
-        log.info("ProductVariant updated successfully!");
+        log.info("ProductVariant updated successfully with ID: {}", updatedVariant.getVariantId());
 
         ProductVariantDTO responseDTO = new ProductVariantDTO();
         responseDTO.setVariantId(updatedVariant.getVariantId());
@@ -79,11 +126,20 @@ public class ProductVariantServiceImpl implements ProductVariantService {
     public String deleteProductVariant(Long variantId) {
         log.info("Execute deleteProductVariant()");
 
-        ProductVariant variant = productVariantRepository.findById(variantId).orElse(null);
-        if (variant != null) {
-            variant.setVariantStatus(ProductVariantStatus.DELETED);
-            productVariantRepository.save(variant);
+        if (variantId == null) {
+            throw new CustomException(400, "Product variant ID cannot be null!");
         }
+
+        ProductVariant variant = productVariantRepository.findById(variantId)
+                .orElseThrow(() -> new CustomException(404, "Product variant not found with ID: " + variantId));
+
+        if (variant.getVariantStatus() == ProductVariantStatus.DELETED) {
+            throw new CustomException(400, "Product variant is already deleted!");
+        }
+
+        variant.setVariantStatus(ProductVariantStatus.DELETED);
+        productVariantRepository.save(variant);
+        log.info("ProductVariant marked as DELETED for ID: {}", variantId);
 
         return "ProductVariant deleted successfully!";
     }
@@ -114,7 +170,16 @@ public class ProductVariantServiceImpl implements ProductVariantService {
     public ProductVariantDTO getProductVariantById(Long variantId) {
         log.info("Execute getProductVariantById()");
 
-        ProductVariant variant = productVariantRepository.findById(variantId).orElse(new ProductVariant());
+        if (variantId == null) {
+            throw new CustomException(400, "Product variant ID cannot be null!");
+        }
+
+        ProductVariant variant = productVariantRepository.findById(variantId)
+                .orElseThrow(() -> new CustomException(404, "Product variant not found with ID: " + variantId));
+
+        if (variant.getVariantStatus() == ProductVariantStatus.DELETED) {
+            throw new CustomException(404, "Product variant not found or has been deleted!");
+        }
 
         ProductVariantDTO dto = new ProductVariantDTO();
         dto.setVariantId(variant.getVariantId());
@@ -129,6 +194,14 @@ public class ProductVariantServiceImpl implements ProductVariantService {
     @Override
     public List<ProductVariantDTO> getVariantsByProductId(Long productId) {
         log.info("Execute getVariantsByProductId()");
+
+        if (productId == null) {
+            throw new CustomException(400, "Product ID cannot be null!");
+        }
+
+        if (!productRepository.existsById(productId)) {
+            throw new CustomException(404, "Product not found with ID: " + productId);
+        }
 
         List<ProductVariant> variantList = productVariantRepository.findAllByProduct_ProductId(productId);
         List<ProductVariantDTO> responseList = new ArrayList<>();

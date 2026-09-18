@@ -4,7 +4,9 @@ import jakarta.transaction.Transactional;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.RepairDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Customer;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Repair;
+import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.CustomerStatus;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.RepairStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.CustomerRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.RepairRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.RepairService;
@@ -32,14 +34,29 @@ public class RepairServiceImpl implements RepairService {
     public RepairDTO saveRepair(RepairDTO repairDTO) {
         log.info("Execute saveRepair()");
 
-        Customer customer = null;
-        if (repairDTO.getCustomerId() != null) {
-            customer = customerRepository.findById(repairDTO.getCustomerId()).orElse(null);
+        if (repairDTO == null) {
+            throw new CustomException(400, "Repair data cannot be null!");
+        }
+        if (repairDTO.getCustomerId() == null) {
+            throw new CustomException(400, "Customer ID cannot be null!");
+        }
+        if (repairDTO.getDeviceModel() == null || repairDTO.getDeviceModel().trim().isEmpty()) {
+            throw new CustomException(400, "Device model cannot be empty!");
+        }
+        if (repairDTO.getDescription() == null || repairDTO.getDescription().trim().isEmpty()) {
+            throw new CustomException(400, "Repair description cannot be empty!");
+        }
+
+        Customer customer = customerRepository.findById(repairDTO.getCustomerId())
+                .orElseThrow(() -> new CustomException(404, "Customer not found with ID: " + repairDTO.getCustomerId()));
+
+        if (customer.getCustomerStatus() == CustomerStatus.DELETED) {
+            throw new CustomException(400, "Cannot create a repair request for an inactive or deleted customer!");
         }
 
         Repair repair = new Repair();
-        repair.setDeviceModel(repairDTO.getDeviceModel());
-        repair.setDescription(repairDTO.getDescription());
+        repair.setDeviceModel(repairDTO.getDeviceModel().trim());
+        repair.setDescription(repairDTO.getDescription().trim());
         repair.setRepairStatus(repairDTO.getRepairStatus() != null ? repairDTO.getRepairStatus() : RepairStatus.PENDING);
         repair.setReceivedDate(LocalDateTime.now());
         repair.setCustomer(customer);
@@ -57,22 +74,45 @@ public class RepairServiceImpl implements RepairService {
     public RepairDTO updateRepair(RepairDTO repairDTO) {
         log.info("Execute updateRepair()");
 
-        Repair repair = repairRepository.findById(repairDTO.getRepairId()).orElse(new Repair());
-        Customer customer = null;
-        if (repairDTO.getCustomerId() != null) {
-            customer = customerRepository.findById(repairDTO.getCustomerId()).orElse(null);
+        if (repairDTO == null) {
+            throw new CustomException(400, "Repair update data cannot be null!");
+        }
+        if (repairDTO.getRepairId() == null) {
+            throw new CustomException(400, "Repair ID cannot be null for update!");
+        }
+        if (repairDTO.getDeviceModel() == null || repairDTO.getDeviceModel().trim().isEmpty()) {
+            throw new CustomException(400, "Device model cannot be empty!");
+        }
+        if (repairDTO.getDescription() == null || repairDTO.getDescription().trim().isEmpty()) {
+            throw new CustomException(400, "Repair description cannot be empty!");
         }
 
-        repair.setDeviceModel(repairDTO.getDeviceModel());
-        repair.setDescription(repairDTO.getDescription());
-        repair.setCustomer(customer);
+        Repair repair = repairRepository.findById(repairDTO.getRepairId())
+                .orElseThrow(() -> new CustomException(404, "Repair not found with ID: " + repairDTO.getRepairId()));
+
+        if (repair.getRepairStatus() == RepairStatus.CANCELLED) {
+            throw new CustomException(400, "Cannot update a cancelled repair!");
+        }
+
+        if (repairDTO.getCustomerId() != null) {
+            Customer customer = customerRepository.findById(repairDTO.getCustomerId())
+                    .orElseThrow(() -> new CustomException(404, "Customer not found with ID: " + repairDTO.getCustomerId()));
+
+            if (customer.getCustomerStatus() == CustomerStatus.DELETED) {
+                throw new CustomException(400, "Cannot link repair to an inactive or deleted customer!");
+            }
+            repair.setCustomer(customer);
+        }
+
+        repair.setDeviceModel(repairDTO.getDeviceModel().trim());
+        repair.setDescription(repairDTO.getDescription().trim());
 
         if (repairDTO.getRepairStatus() != null) {
             repair.setRepairStatus(repairDTO.getRepairStatus());
         }
 
         Repair updatedRepair = repairRepository.save(repair);
-        log.info("Repair updated successfully!");
+        log.info("Repair updated successfully with ID: {}", updatedRepair.getRepairId());
 
         RepairDTO responseDTO = new RepairDTO();
         responseDTO.setRepairId(updatedRepair.getRepairId());
@@ -89,11 +129,20 @@ public class RepairServiceImpl implements RepairService {
     public String deleteRepair(Long repairId) {
         log.info("Execute deleteRepair()");
 
-        Repair repair = repairRepository.findById(repairId).orElse(null);
-        if (repair != null) {
-            repair.setRepairStatus(RepairStatus.CANCELLED);
-            repairRepository.save(repair);
+        if (repairId == null) {
+            throw new CustomException(400, "Repair ID cannot be null!");
         }
+
+        Repair repair = repairRepository.findById(repairId)
+                .orElseThrow(() -> new CustomException(404, "Repair not found with ID: " + repairId));
+
+        if (repair.getRepairStatus() == RepairStatus.CANCELLED) {
+            throw new CustomException(400, "Repair is already cancelled!");
+        }
+
+        repair.setRepairStatus(RepairStatus.CANCELLED);
+        repairRepository.save(repair);
+        log.info("Repair marked as CANCELLED for ID: {}", repairId);
 
         return "Repair cancelled successfully!";
     }
@@ -106,15 +155,17 @@ public class RepairServiceImpl implements RepairService {
         List<RepairDTO> responseList = new ArrayList<>();
 
         for (Repair repair : repairList) {
-            RepairDTO dto = new RepairDTO();
-            dto.setRepairId(repair.getRepairId());
-            dto.setDeviceModel(repair.getDeviceModel());
-            dto.setDescription(repair.getDescription());
-            dto.setRepairStatus(repair.getRepairStatus());
-            dto.setReceivedDate(repair.getReceivedDate());
-            dto.setCustomerId(repair.getCustomer() != null ? repair.getCustomer().getCustomerId() : null);
+            if (repair.getRepairStatus() != RepairStatus.CANCELLED) {
+                RepairDTO dto = new RepairDTO();
+                dto.setRepairId(repair.getRepairId());
+                dto.setDeviceModel(repair.getDeviceModel());
+                dto.setDescription(repair.getDescription());
+                dto.setRepairStatus(repair.getRepairStatus());
+                dto.setReceivedDate(repair.getReceivedDate());
+                dto.setCustomerId(repair.getCustomer() != null ? repair.getCustomer().getCustomerId() : null);
 
-            responseList.add(dto);
+                responseList.add(dto);
+            }
         }
         return responseList;
     }
@@ -123,7 +174,16 @@ public class RepairServiceImpl implements RepairService {
     public RepairDTO getRepairById(Long repairId) {
         log.info("Execute getRepairById()");
 
-        Repair repair = repairRepository.findById(repairId).orElse(new Repair());
+        if (repairId == null) {
+            throw new CustomException(400, "Repair ID cannot be null!");
+        }
+
+        Repair repair = repairRepository.findById(repairId)
+                .orElseThrow(() -> new CustomException(404, "Repair not found with ID: " + repairId));
+
+        if (repair.getRepairStatus() == RepairStatus.CANCELLED) {
+            throw new CustomException(404, "Repair not found or has been cancelled!");
+        }
 
         RepairDTO dto = new RepairDTO();
         dto.setRepairId(repair.getRepairId());
@@ -140,19 +200,29 @@ public class RepairServiceImpl implements RepairService {
     public List<RepairDTO> getRepairsByCustomerId(Long customerId) {
         log.info("Execute getRepairsByCustomerId()");
 
+        if (customerId == null) {
+            throw new CustomException(400, "Customer ID cannot be null!");
+        }
+
+        if (!customerRepository.existsById(customerId)) {
+            throw new CustomException(404, "Customer not found with ID: " + customerId);
+        }
+
         List<Repair> repairList = repairRepository.findAllByCustomer_CustomerId(customerId);
         List<RepairDTO> responseList = new ArrayList<>();
 
         for (Repair repair : repairList) {
-            RepairDTO dto = new RepairDTO();
-            dto.setRepairId(repair.getRepairId());
-            dto.setDeviceModel(repair.getDeviceModel());
-            dto.setDescription(repair.getDescription());
-            dto.setRepairStatus(repair.getRepairStatus());
-            dto.setReceivedDate(repair.getReceivedDate());
-            dto.setCustomerId(repair.getCustomer() != null ? repair.getCustomer().getCustomerId() : null);
+            if (repair.getRepairStatus() != RepairStatus.CANCELLED) {
+                RepairDTO dto = new RepairDTO();
+                dto.setRepairId(repair.getRepairId());
+                dto.setDeviceModel(repair.getDeviceModel());
+                dto.setDescription(repair.getDescription());
+                dto.setRepairStatus(repair.getRepairStatus());
+                dto.setReceivedDate(repair.getReceivedDate());
+                dto.setCustomerId(repair.getCustomer() != null ? repair.getCustomer().getCustomerId() : null);
 
-            responseList.add(dto);
+                responseList.add(dto);
+            }
         }
         return responseList;
     }

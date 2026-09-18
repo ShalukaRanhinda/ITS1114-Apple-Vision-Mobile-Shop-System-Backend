@@ -5,6 +5,7 @@ import lk.ijse.Apple.Vision.Mobile.Shop.DTO.InventoryDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Inventory;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.ProductVariant;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.InventoryStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.InventoryRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.ProductVariantRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.InventoryService;
@@ -31,7 +32,23 @@ public class InventoryServiceImpl implements InventoryService {
     public InventoryDTO saveInventory(InventoryDTO inventoryDTO) {
         log.info("Execute saveInventory()");
 
-        ProductVariant variant = productVariantRepository.findById(inventoryDTO.getVariantId()).orElse(null);
+        if (inventoryDTO == null) {
+            throw new CustomException(400, "Inventory data cannot be null!");
+        }
+        if (inventoryDTO.getVariantId() == null) {
+            throw new CustomException(400, "Product variant ID cannot be null!");
+        }
+        if (inventoryDTO.getQuantity() < 0) {
+            throw new CustomException(400, "Inventory quantity cannot be negative!");
+        }
+
+        ProductVariant variant = productVariantRepository.findById(inventoryDTO.getVariantId())
+                .orElseThrow(() -> new CustomException(404, "Product variant not found with ID: " + inventoryDTO.getVariantId()));
+
+        // Variant එකට දැනටමත් Inventory record එකක් පවතීදැයි පරීක්ෂා කිරීම
+        if (inventoryRepository.findByProductVariant_VariantId(inventoryDTO.getVariantId()).isPresent()) {
+            throw new CustomException(400, "Inventory already exists for product variant ID: " + inventoryDTO.getVariantId());
+        }
 
         Inventory inventory = new Inventory();
         inventory.setProductVariant(variant);
@@ -50,10 +67,29 @@ public class InventoryServiceImpl implements InventoryService {
     public InventoryDTO updateInventory(InventoryDTO inventoryDTO) {
         log.info("Execute updateInventory()");
 
-        Inventory inventory = inventoryRepository.findById(inventoryDTO.getInventoryId()).orElse(new Inventory());
-        ProductVariant variant = productVariantRepository.findById(inventoryDTO.getVariantId()).orElse(null);
+        if (inventoryDTO == null) {
+            throw new CustomException(400, "Inventory update data cannot be null!");
+        }
+        if (inventoryDTO.getInventoryId() == null) {
+            throw new CustomException(400, "Inventory ID cannot be null for update!");
+        }
+        if (inventoryDTO.getQuantity() < 0) {
+            throw new CustomException(400, "Inventory quantity cannot be negative!");
+        }
 
-        inventory.setProductVariant(variant);
+        Inventory inventory = inventoryRepository.findById(inventoryDTO.getInventoryId())
+                .orElseThrow(() -> new CustomException(404, "Inventory not found with ID: " + inventoryDTO.getInventoryId()));
+
+        if (inventory.getInventoryStatus() == InventoryStatus.DELETED) {
+            throw new CustomException(400, "Cannot update a deleted inventory record!");
+        }
+
+        if (inventoryDTO.getVariantId() != null) {
+            ProductVariant variant = productVariantRepository.findById(inventoryDTO.getVariantId())
+                    .orElseThrow(() -> new CustomException(404, "Product variant not found with ID: " + inventoryDTO.getVariantId()));
+            inventory.setProductVariant(variant);
+        }
+
         inventory.setQuantity(inventoryDTO.getQuantity());
 
         if (inventoryDTO.getInventoryStatus() != null) {
@@ -61,7 +97,7 @@ public class InventoryServiceImpl implements InventoryService {
         }
 
         Inventory updatedInventory = inventoryRepository.save(inventory);
-        log.info("Inventory updated successfully!");
+        log.info("Inventory updated successfully with ID: {}", updatedInventory.getInventoryId());
 
         InventoryDTO responseDTO = new InventoryDTO();
         responseDTO.setInventoryId(updatedInventory.getInventoryId());
@@ -76,11 +112,20 @@ public class InventoryServiceImpl implements InventoryService {
     public String deleteInventory(Long inventoryId) {
         log.info("Execute deleteInventory()");
 
-        Inventory inventory = inventoryRepository.findById(inventoryId).orElse(null);
-        if (inventory != null) {
-            inventory.setInventoryStatus(InventoryStatus.DELETED);
-            inventoryRepository.save(inventory);
+        if (inventoryId == null) {
+            throw new CustomException(400, "Inventory ID cannot be null!");
         }
+
+        Inventory inventory = inventoryRepository.findById(inventoryId)
+                .orElseThrow(() -> new CustomException(404, "Inventory not found with ID: " + inventoryId));
+
+        if (inventory.getInventoryStatus() == InventoryStatus.DELETED) {
+            throw new CustomException(400, "Inventory is already deleted!");
+        }
+
+        inventory.setInventoryStatus(InventoryStatus.DELETED);
+        inventoryRepository.save(inventory);
+        log.info("Inventory marked as DELETED for ID: {}", inventoryId);
 
         return "Inventory deleted successfully!";
     }
@@ -110,7 +155,16 @@ public class InventoryServiceImpl implements InventoryService {
     public InventoryDTO getInventoryById(Long inventoryId) {
         log.info("Execute getInventoryById()");
 
-        Inventory inventory = inventoryRepository.findById(inventoryId).orElse(new Inventory());
+        if (inventoryId == null) {
+            throw new CustomException(400, "Inventory ID cannot be null!");
+        }
+
+        Inventory inventory = inventoryRepository.findById(inventoryId)
+                .orElseThrow(() -> new CustomException(404, "Inventory not found with ID: " + inventoryId));
+
+        if (inventory.getInventoryStatus() == InventoryStatus.DELETED) {
+            throw new CustomException(404, "Inventory not found or has been deleted!");
+        }
 
         InventoryDTO dto = new InventoryDTO();
         dto.setInventoryId(inventory.getInventoryId());
@@ -125,7 +179,16 @@ public class InventoryServiceImpl implements InventoryService {
     public InventoryDTO getInventoryByVariantId(Long variantId) {
         log.info("Execute getInventoryByVariantId()");
 
-        Inventory inventory = inventoryRepository.findByProductVariant_VariantId(variantId).orElse(new Inventory());
+        if (variantId == null) {
+            throw new CustomException(400, "Product variant ID cannot be null!");
+        }
+
+        Inventory inventory = inventoryRepository.findByProductVariant_VariantId(variantId)
+                .orElseThrow(() -> new CustomException(404, "No active inventory found for variant ID: " + variantId));
+
+        if (inventory.getInventoryStatus() == InventoryStatus.DELETED) {
+            throw new CustomException(404, "Inventory not found or has been deleted!");
+        }
 
         InventoryDTO dto = new InventoryDTO();
         dto.setInventoryId(inventory.getInventoryId());

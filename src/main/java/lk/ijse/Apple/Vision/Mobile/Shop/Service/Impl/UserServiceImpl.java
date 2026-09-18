@@ -8,6 +8,7 @@ import lk.ijse.Apple.Vision.Mobile.Shop.Entity.User;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.CustomerStatus;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.UserRole;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.UserStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.UserRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.UserService;
 import lombok.extern.slf4j.Slf4j;
@@ -29,19 +30,50 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserDTO saveUser(UserDTO userDTO) {
-        log.info("Execute Save User!");
+        log.info("Execute saveUser()");
+
+        if (userDTO == null) {
+            throw new CustomException(400, "User data cannot be null!");
+        }
+        if (userDTO.getUserName() == null || userDTO.getUserName().trim().isEmpty()) {
+            throw new CustomException(400, "Username cannot be empty!");
+        }
+        if (userDTO.getPassword() == null || userDTO.getPassword().trim().isEmpty()) {
+            throw new CustomException(400, "Password cannot be empty!");
+        }
+        if (userDTO.getRole() == null) {
+            throw new CustomException(400, "User role cannot be null!");
+        }
+
+        // Username duplicate check
+        if (userRepository.findByUserName(userDTO.getUserName().trim()).isPresent()) {
+            throw new CustomException(400, "Username already exists: " + userDTO.getUserName());
+        }
 
         User user = new User();
-        user.setUserName(userDTO.getUserName());
-        user.setPassword(userDTO.getPassword());
+        user.setUserName(userDTO.getUserName().trim());
+        user.setPassword(userDTO.getPassword().trim());
         user.setRole(userDTO.getRole());
         user.setUserStatus(UserStatus.ACTIVE);
 
-        if (userDTO.getRole() == UserRole.CUSTOMER && userDTO.getCustomerDTO() != null) {
+        if (userDTO.getRole() == UserRole.CUSTOMER) {
+            if (userDTO.getCustomerDTO() == null) {
+                throw new CustomException(400, "Customer details are required for role CUSTOMER!");
+            }
+            if (userDTO.getCustomerDTO().getFullName() == null || userDTO.getCustomerDTO().getFullName().trim().isEmpty()) {
+                throw new CustomException(400, "Customer full name cannot be empty!");
+            }
+            if (userDTO.getCustomerDTO().getEmail() == null || userDTO.getCustomerDTO().getEmail().trim().isEmpty()) {
+                throw new CustomException(400, "Customer email cannot be empty!");
+            }
+            if (userDTO.getCustomerDTO().getPhoneNumber() == null || userDTO.getCustomerDTO().getPhoneNumber().trim().isEmpty()) {
+                throw new CustomException(400, "Customer phone number cannot be empty!");
+            }
+
             Customer customer = new Customer();
-            customer.setFullName(userDTO.getCustomerDTO().getFullName());
-            customer.setEmail(userDTO.getCustomerDTO().getEmail());
-            customer.setPhoneNumber(userDTO.getCustomerDTO().getPhoneNumber());
+            customer.setFullName(userDTO.getCustomerDTO().getFullName().trim());
+            customer.setEmail(userDTO.getCustomerDTO().getEmail().trim());
+            customer.setPhoneNumber(userDTO.getCustomerDTO().getPhoneNumber().trim());
             customer.setCustomerStatus(CustomerStatus.ACTIVE);
 
             customer.setUser(user);
@@ -49,7 +81,7 @@ public class UserServiceImpl implements UserService {
         }
 
         User savedUser = userRepository.save(user);
-        log.info("User saved!");
+        log.info("User saved successfully with ID: {}", savedUser.getUserId());
 
         userDTO.setUserId(savedUser.getUserId());
         userDTO.setUserStatus(savedUser.getUserStatus());
@@ -62,35 +94,76 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserDTO updateUser(UserDTO userDTO) {
-        log.info("Execute Update User!");
+        log.info("Execute updateUser()");
 
-        User user = userRepository.findById(userDTO.getUserId()).orElse(new User());
+        if (userDTO == null) {
+            throw new CustomException(400, "User update data cannot be null!");
+        }
+        if (userDTO.getUserId() == null) {
+            throw new CustomException(400, "User ID cannot be null for update!");
+        }
+        if (userDTO.getUserName() == null || userDTO.getUserName().trim().isEmpty()) {
+            throw new CustomException(400, "Username cannot be empty!");
+        }
+        if (userDTO.getRole() == null) {
+            throw new CustomException(400, "User role cannot be null!");
+        }
 
-        user.setUserName(userDTO.getUserName());
-        user.setPassword(userDTO.getPassword());
+        User user = userRepository.findById(userDTO.getUserId())
+                .orElseThrow(() -> new CustomException(404, "User not found with ID: " + userDTO.getUserId()));
+
+        if (user.getUserStatus() == UserStatus.DELETED) {
+            throw new CustomException(400, "Cannot update a deleted user!");
+        }
+
+        // Check if new username belongs to another account
+        String trimmedUserName = userDTO.getUserName().trim();
+        if (!trimmedUserName.equals(user.getUserName()) && userRepository.findByUserName(trimmedUserName).isPresent()) {
+            throw new CustomException(400, "Username already exists: " + trimmedUserName);
+        }
+
+        user.setUserName(trimmedUserName);
+        if (userDTO.getPassword() != null && !userDTO.getPassword().trim().isEmpty()) {
+            user.setPassword(userDTO.getPassword().trim());
+        }
         user.setRole(userDTO.getRole());
+
         if (userDTO.getUserStatus() != null) {
             user.setUserStatus(userDTO.getUserStatus());
         }
 
-        if (userDTO.getRole() == UserRole.CUSTOMER && userDTO.getCustomerDTO() != null) {
-            Customer customer = user.getCustomer();
+        if (userDTO.getRole() == UserRole.CUSTOMER) {
+            if (userDTO.getCustomerDTO() == null) {
+                throw new CustomException(400, "Customer details are required for role CUSTOMER!");
+            }
 
+            Customer customer = user.getCustomer();
             if (customer == null) {
                 customer = new Customer();
                 customer.setUser(user);
                 user.setCustomer(customer);
             }
 
-            customer.setFullName(userDTO.getCustomerDTO().getFullName());
-            customer.setEmail(userDTO.getCustomerDTO().getEmail());
-            customer.setPhoneNumber(userDTO.getCustomerDTO().getPhoneNumber());
+            if (userDTO.getCustomerDTO().getFullName() != null && !userDTO.getCustomerDTO().getFullName().trim().isEmpty()) {
+                customer.setFullName(userDTO.getCustomerDTO().getFullName().trim());
+            }
+            if (userDTO.getCustomerDTO().getEmail() != null && !userDTO.getCustomerDTO().getEmail().trim().isEmpty()) {
+                customer.setEmail(userDTO.getCustomerDTO().getEmail().trim());
+            }
+            if (userDTO.getCustomerDTO().getPhoneNumber() != null && !userDTO.getCustomerDTO().getPhoneNumber().trim().isEmpty()) {
+                customer.setPhoneNumber(userDTO.getCustomerDTO().getPhoneNumber().trim());
+            }
             customer.setCustomerStatus(CustomerStatus.ACTIVE);
         } else {
-            user.setCustomer(null);
+            // If role changed from CUSTOMER to another role, dissociate customer profile
+            if (user.getCustomer() != null) {
+                user.getCustomer().setCustomerStatus(CustomerStatus.DELETED);
+                user.setCustomer(null);
+            }
         }
 
         User updatedUser = userRepository.save(user);
+        log.info("User updated successfully with ID: {}", updatedUser.getUserId());
 
         UserDTO responseDTO = new UserDTO();
         responseDTO.setUserId(updatedUser.getUserId());
@@ -115,23 +188,33 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public String deleteUser(Long userId) {
-        log.info("Execute Delete User");
+        log.info("Execute deleteUser()");
 
-        User user = userRepository.findById(userId).orElse(null);
-        if (user != null) {
-            user.setUserStatus(UserStatus.DELETED);
-            if (user.getCustomer() != null) {
-                user.getCustomer().setCustomerStatus(CustomerStatus.DELETED);
-            }
-            userRepository.save(user);
+        if (userId == null) {
+            throw new CustomException(400, "User ID cannot be null!");
         }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new CustomException(404, "User not found with ID: " + userId));
+
+        if (user.getUserStatus() == UserStatus.DELETED) {
+            throw new CustomException(400, "User is already deleted!");
+        }
+
+        user.setUserStatus(UserStatus.DELETED);
+        if (user.getCustomer() != null) {
+            user.getCustomer().setCustomerStatus(CustomerStatus.DELETED);
+        }
+        userRepository.save(user);
+        log.info("User marked as DELETED for ID: {}", userId);
 
         return "User deleted successfully!";
     }
 
     @Override
     public List<UserDTO> getAllUsers() {
-        log.info("Execute Get All Users");
+        log.info("Execute getAllUsers()");
+
         List<UserDTO> responseList = new ArrayList<>();
         List<User> usersList = userRepository.findAll();
 
@@ -167,9 +250,18 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserDTO getUserById(Long userId) {
-        log.info("Execute Get User");
+        log.info("Execute getUserById()");
 
-        User user = userRepository.findById(userId).orElse(new User());
+        if (userId == null) {
+            throw new CustomException(400, "User ID cannot be null!");
+        }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new CustomException(404, "User not found with ID: " + userId));
+
+        if (user.getUserStatus() == UserStatus.DELETED) {
+            throw new CustomException(404, "User not found or has been deleted!");
+        }
 
         UserDTO userDTO = new UserDTO();
         userDTO.setUserId(user.getUserId());

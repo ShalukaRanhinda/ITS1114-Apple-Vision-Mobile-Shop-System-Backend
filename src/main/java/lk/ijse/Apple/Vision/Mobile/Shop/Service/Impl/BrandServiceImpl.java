@@ -4,6 +4,7 @@ import jakarta.transaction.Transactional;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.BrandDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Brand;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.BrandStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.BrandRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.BrandService;
 import lombok.extern.slf4j.Slf4j;
@@ -27,8 +28,15 @@ public class BrandServiceImpl implements BrandService {
     public BrandDTO saveBrand(BrandDTO brandDTO) {
         log.info("Execute saveBrand()");
 
+        if (brandDTO == null) {
+            throw new CustomException(400, "Brand data cannot be null!");
+        }
+        if (brandDTO.getBrandName() == null || brandDTO.getBrandName().trim().isEmpty()) {
+            throw new CustomException(400, "Brand name cannot be empty!");
+        }
+
         Brand brand = new Brand();
-        brand.setBrandName(brandDTO.getBrandName());
+        brand.setBrandName(brandDTO.getBrandName().trim());
         brand.setBrandDescription(brandDTO.getBrandDescription());
         brand.setCountry(brandDTO.getCountry());
         brand.setBrandStatus(BrandStatus.ACTIVE);
@@ -45,9 +53,24 @@ public class BrandServiceImpl implements BrandService {
     public BrandDTO updateBrand(BrandDTO brandDTO) {
         log.info("Execute updateBrand()");
 
-        Brand brand = brandRepository.findById(brandDTO.getBrandId()).orElse(new Brand());
+        if (brandDTO == null) {
+            throw new CustomException(400, "Brand update data cannot be null!");
+        }
+        if (brandDTO.getBrandId() == null) {
+            throw new CustomException(400, "Brand ID cannot be null for update!");
+        }
+        if (brandDTO.getBrandName() == null || brandDTO.getBrandName().trim().isEmpty()) {
+            throw new CustomException(400, "Brand name cannot be empty!");
+        }
 
-        brand.setBrandName(brandDTO.getBrandName());
+        Brand brand = brandRepository.findById(brandDTO.getBrandId())
+                .orElseThrow(() -> new CustomException(404, "Brand not found with ID: " + brandDTO.getBrandId()));
+
+        if (brand.getBrandStatus() == BrandStatus.DELETED) {
+            throw new CustomException(400, "Cannot update a deleted brand!");
+        }
+
+        brand.setBrandName(brandDTO.getBrandName().trim());
         brand.setBrandDescription(brandDTO.getBrandDescription());
         brand.setCountry(brandDTO.getCountry());
 
@@ -56,7 +79,7 @@ public class BrandServiceImpl implements BrandService {
         }
 
         Brand updatedBrand = brandRepository.save(brand);
-        log.info("Brand updated successfully!");
+        log.info("Brand updated successfully with ID: {}", updatedBrand.getBrandId());
 
         BrandDTO responseDTO = new BrandDTO();
         responseDTO.setBrandId(updatedBrand.getBrandId());
@@ -72,11 +95,20 @@ public class BrandServiceImpl implements BrandService {
     public String deleteBrand(Long brandId) {
         log.info("Execute deleteBrand()");
 
-        Brand brand = brandRepository.findById(brandId).orElse(null);
-        if (brand != null) {
-            brand.setBrandStatus(BrandStatus.DELETED);
-            brandRepository.save(brand);
+        if (brandId == null) {
+            throw new CustomException(400, "Brand ID cannot be null!");
         }
+
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() -> new CustomException(404, "Brand not found with ID: " + brandId));
+
+        if (brand.getBrandStatus() == BrandStatus.DELETED) {
+            throw new CustomException(400, "Brand is already deleted!");
+        }
+
+        brand.setBrandStatus(BrandStatus.DELETED);
+        brandRepository.save(brand);
+        log.info("Brand marked as DELETED for ID: {}", brandId);
 
         return "Brand deleted successfully!";
     }
@@ -107,7 +139,16 @@ public class BrandServiceImpl implements BrandService {
     public BrandDTO getBrandById(Long brandId) {
         log.info("Execute getBrandById()");
 
-        Brand brand = brandRepository.findById(brandId).orElse(new Brand());
+        if (brandId == null) {
+            throw new CustomException(400, "Brand ID cannot be null!");
+        }
+
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() -> new CustomException(404, "Brand not found with ID: " + brandId));
+
+        if (brand.getBrandStatus() == BrandStatus.DELETED) {
+            throw new CustomException(404, "Brand not found or has been deleted!");
+        }
 
         BrandDTO brandDTO = new BrandDTO();
         brandDTO.setBrandId(brand.getBrandId());

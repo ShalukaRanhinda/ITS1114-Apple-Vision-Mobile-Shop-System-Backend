@@ -6,6 +6,7 @@ import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Order;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Payment;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Repair;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.PaymentStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.OrderRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.PaymentRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.RepairRepository;
@@ -13,6 +14,7 @@ import lk.ijse.Apple.Vision.Mobile.Shop.Service.PaymentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,14 +40,29 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentDTO savePayment(PaymentDTO paymentDTO) {
         log.info("Execute savePayment()");
 
+        if (paymentDTO == null) {
+            throw new CustomException(400, "Payment data cannot be null!");
+        }
+        if (paymentDTO.getAmount() == null || paymentDTO.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new CustomException(400, "Payment amount must be greater than zero!");
+        }
+        if (paymentDTO.getPaymentMethod() == null) {
+            throw new CustomException(400, "Payment method cannot be null!");
+        }
+        if (paymentDTO.getOrderId() == null && paymentDTO.getRepairId() == null) {
+            throw new CustomException(400, "Payment must be linked to either an Order or a Repair!");
+        }
+
         Order order = null;
         if (paymentDTO.getOrderId() != null) {
-            order = orderRepository.findById(paymentDTO.getOrderId()).orElse(null);
+            order = orderRepository.findById(paymentDTO.getOrderId())
+                    .orElseThrow(() -> new CustomException(404, "Order not found with ID: " + paymentDTO.getOrderId()));
         }
 
         Repair repair = null;
         if (paymentDTO.getRepairId() != null) {
-            repair = repairRepository.findById(paymentDTO.getRepairId()).orElse(null);
+            repair = repairRepository.findById(paymentDTO.getRepairId())
+                    .orElseThrow(() -> new CustomException(404, "Repair not found with ID: " + paymentDTO.getRepairId()));
         }
 
         Payment payment = new Payment();
@@ -69,20 +86,37 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentDTO updatePayment(PaymentDTO paymentDTO) {
         log.info("Execute updatePayment()");
 
-        Payment payment = paymentRepository.findById(paymentDTO.getPaymentId()).orElse(new Payment());
+        if (paymentDTO == null) {
+            throw new CustomException(400, "Payment update data cannot be null!");
+        }
+        if (paymentDTO.getPaymentId() == null) {
+            throw new CustomException(400, "Payment ID cannot be null for update!");
+        }
+
+        Payment payment = paymentRepository.findById(paymentDTO.getPaymentId())
+                .orElseThrow(() -> new CustomException(404, "Payment not found with ID: " + paymentDTO.getPaymentId()));
+
+        if (payment.getPaymentStatus() == PaymentStatus.DELETED) {
+            throw new CustomException(400, "Cannot update a deleted payment!");
+        }
 
         if (paymentDTO.getAmount() != null) {
+            if (paymentDTO.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new CustomException(400, "Payment amount must be greater than zero!");
+            }
             payment.setAmount(paymentDTO.getAmount());
         }
+
         if (paymentDTO.getPaymentMethod() != null) {
             payment.setPaymentMethod(paymentDTO.getPaymentMethod());
         }
+
         if (paymentDTO.getPaymentStatus() != null) {
             payment.setPaymentStatus(paymentDTO.getPaymentStatus());
         }
 
         Payment updatedPayment = paymentRepository.save(payment);
-        log.info("Payment updated successfully!");
+        log.info("Payment updated successfully with ID: {}", updatedPayment.getPaymentId());
 
         PaymentDTO responseDTO = new PaymentDTO();
         responseDTO.setPaymentId(updatedPayment.getPaymentId());
@@ -100,11 +134,20 @@ public class PaymentServiceImpl implements PaymentService {
     public String deletePayment(Long paymentId) {
         log.info("Execute deletePayment()");
 
-        Payment payment = paymentRepository.findById(paymentId).orElse(null);
-        if (payment != null) {
-            payment.setPaymentStatus(PaymentStatus.DELETED);
-            paymentRepository.save(payment);
+        if (paymentId == null) {
+            throw new CustomException(400, "Payment ID cannot be null!");
         }
+
+        Payment payment = paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new CustomException(404, "Payment not found with ID: " + paymentId));
+
+        if (payment.getPaymentStatus() == PaymentStatus.DELETED) {
+            throw new CustomException(400, "Payment is already deleted!");
+        }
+
+        payment.setPaymentStatus(PaymentStatus.DELETED);
+        paymentRepository.save(payment);
+        log.info("Payment marked as DELETED for ID: {}", paymentId);
 
         return "Payment deleted successfully!";
     }
@@ -137,7 +180,16 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentDTO getPaymentById(Long paymentId) {
         log.info("Execute getPaymentById()");
 
-        Payment payment = paymentRepository.findById(paymentId).orElse(new Payment());
+        if (paymentId == null) {
+            throw new CustomException(400, "Payment ID cannot be null!");
+        }
+
+        Payment payment = paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new CustomException(404, "Payment not found with ID: " + paymentId));
+
+        if (payment.getPaymentStatus() == PaymentStatus.DELETED) {
+            throw new CustomException(404, "Payment not found or has been deleted!");
+        }
 
         PaymentDTO dto = new PaymentDTO();
         dto.setPaymentId(payment.getPaymentId());
@@ -154,6 +206,14 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     public List<PaymentDTO> getPaymentsByOrderId(Long orderId) {
         log.info("Execute getPaymentsByOrderId()");
+
+        if (orderId == null) {
+            throw new CustomException(400, "Order ID cannot be null!");
+        }
+
+        if (!orderRepository.existsById(orderId)) {
+            throw new CustomException(404, "Order not found with ID: " + orderId);
+        }
 
         List<Payment> paymentList = paymentRepository.findAllByOrder_OrderId(orderId);
         List<PaymentDTO> responseList = new ArrayList<>();
@@ -178,6 +238,14 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     public List<PaymentDTO> getPaymentsByRepairId(Long repairId) {
         log.info("Execute getPaymentsByRepairId()");
+
+        if (repairId == null) {
+            throw new CustomException(400, "Repair ID cannot be null!");
+        }
+
+        if (!repairRepository.existsById(repairId)) {
+            throw new CustomException(404, "Repair not found with ID: " + repairId);
+        }
 
         List<Payment> paymentList = paymentRepository.findAllByRepair_RepairId(repairId);
         List<PaymentDTO> responseList = new ArrayList<>();

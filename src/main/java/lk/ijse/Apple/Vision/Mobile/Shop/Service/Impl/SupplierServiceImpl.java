@@ -4,6 +4,7 @@ import jakarta.transaction.Transactional;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.SupplierDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Supplier;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.SupplierStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.SupplierRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.SupplierService;
 import lombok.extern.slf4j.Slf4j;
@@ -27,10 +28,23 @@ public class SupplierServiceImpl implements SupplierService {
     public SupplierDTO saveSupplier(SupplierDTO supplierDTO) {
         log.info("Execute saveSupplier()");
 
+        if (supplierDTO == null) {
+            throw new CustomException(400, "Supplier data cannot be null!");
+        }
+        if (supplierDTO.getSupplierName() == null || supplierDTO.getSupplierName().trim().isEmpty()) {
+            throw new CustomException(400, "Supplier name cannot be empty!");
+        }
+        if (supplierDTO.getPhoneNumber() == null || supplierDTO.getPhoneNumber().trim().isEmpty()) {
+            throw new CustomException(400, "Phone number cannot be empty!");
+        }
+        if (supplierDTO.getEmail() == null || supplierDTO.getEmail().trim().isEmpty()) {
+            throw new CustomException(400, "Email cannot be empty!");
+        }
+
         Supplier supplier = new Supplier();
-        supplier.setSupplierName(supplierDTO.getSupplierName());
-        supplier.setPhoneNumber(supplierDTO.getPhoneNumber());
-        supplier.setEmail(supplierDTO.getEmail());
+        supplier.setSupplierName(supplierDTO.getSupplierName().trim());
+        supplier.setPhoneNumber(supplierDTO.getPhoneNumber().trim());
+        supplier.setEmail(supplierDTO.getEmail().trim());
         supplier.setSupplierStatus(SupplierStatus.ACTIVE);
 
         Supplier savedSupplier = supplierRepository.save(supplier);
@@ -45,18 +59,39 @@ public class SupplierServiceImpl implements SupplierService {
     public SupplierDTO updateSupplier(SupplierDTO supplierDTO) {
         log.info("Execute updateSupplier()");
 
-        Supplier supplier = supplierRepository.findById(supplierDTO.getSupplierId()).orElse(new Supplier());
+        if (supplierDTO == null) {
+            throw new CustomException(400, "Supplier update data cannot be null!");
+        }
+        if (supplierDTO.getSupplierId() == null) {
+            throw new CustomException(400, "Supplier ID cannot be null for update!");
+        }
+        if (supplierDTO.getSupplierName() == null || supplierDTO.getSupplierName().trim().isEmpty()) {
+            throw new CustomException(400, "Supplier name cannot be empty!");
+        }
+        if (supplierDTO.getPhoneNumber() == null || supplierDTO.getPhoneNumber().trim().isEmpty()) {
+            throw new CustomException(400, "Phone number cannot be empty!");
+        }
+        if (supplierDTO.getEmail() == null || supplierDTO.getEmail().trim().isEmpty()) {
+            throw new CustomException(400, "Email cannot be empty!");
+        }
 
-        supplier.setSupplierName(supplierDTO.getSupplierName());
-        supplier.setPhoneNumber(supplierDTO.getPhoneNumber());
-        supplier.setEmail(supplierDTO.getEmail());
+        Supplier supplier = supplierRepository.findById(supplierDTO.getSupplierId())
+                .orElseThrow(() -> new CustomException(404, "Supplier not found with ID: " + supplierDTO.getSupplierId()));
+
+        if (supplier.getSupplierStatus() == SupplierStatus.DELETED) {
+            throw new CustomException(400, "Cannot update a deleted supplier!");
+        }
+
+        supplier.setSupplierName(supplierDTO.getSupplierName().trim());
+        supplier.setPhoneNumber(supplierDTO.getPhoneNumber().trim());
+        supplier.setEmail(supplierDTO.getEmail().trim());
 
         if (supplierDTO.getSupplierStatus() != null) {
             supplier.setSupplierStatus(supplierDTO.getSupplierStatus());
         }
 
         Supplier updatedSupplier = supplierRepository.save(supplier);
-        log.info("Supplier updated successfully!");
+        log.info("Supplier updated successfully with ID: {}", updatedSupplier.getSupplierId());
 
         SupplierDTO responseDTO = new SupplierDTO();
         responseDTO.setSupplierId(updatedSupplier.getSupplierId());
@@ -72,11 +107,20 @@ public class SupplierServiceImpl implements SupplierService {
     public String deleteSupplier(Long supplierId) {
         log.info("Execute deleteSupplier()");
 
-        Supplier supplier = supplierRepository.findById(supplierId).orElse(null);
-        if (supplier != null) {
-            supplier.setSupplierStatus(SupplierStatus.DELETED);
-            supplierRepository.save(supplier);
+        if (supplierId == null) {
+            throw new CustomException(400, "Supplier ID cannot be null!");
         }
+
+        Supplier supplier = supplierRepository.findById(supplierId)
+                .orElseThrow(() -> new CustomException(404, "Supplier not found with ID: " + supplierId));
+
+        if (supplier.getSupplierStatus() == SupplierStatus.DELETED) {
+            throw new CustomException(400, "Supplier is already deleted!");
+        }
+
+        supplier.setSupplierStatus(SupplierStatus.DELETED);
+        supplierRepository.save(supplier);
+        log.info("Supplier marked as DELETED for ID: {}", supplierId);
 
         return "Supplier deleted successfully!";
     }
@@ -107,7 +151,16 @@ public class SupplierServiceImpl implements SupplierService {
     public SupplierDTO getSupplierById(Long supplierId) {
         log.info("Execute getSupplierById()");
 
-        Supplier supplier = supplierRepository.findById(supplierId).orElse(new Supplier());
+        if (supplierId == null) {
+            throw new CustomException(400, "Supplier ID cannot be null!");
+        }
+
+        Supplier supplier = supplierRepository.findById(supplierId)
+                .orElseThrow(() -> new CustomException(404, "Supplier not found with ID: " + supplierId));
+
+        if (supplier.getSupplierStatus() == SupplierStatus.DELETED) {
+            throw new CustomException(404, "Supplier not found or has been deleted!");
+        }
 
         SupplierDTO supplierDTO = new SupplierDTO();
         supplierDTO.setSupplierId(supplier.getSupplierId());

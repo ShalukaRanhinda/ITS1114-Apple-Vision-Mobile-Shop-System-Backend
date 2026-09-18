@@ -8,7 +8,10 @@ import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Inventory;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Order;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.OrderDetail;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.ProductVariant;
+import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.CustomerStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.InventoryStatus;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.OrderStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.CustomerRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.InventoryRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.OrderRepository;
@@ -17,6 +20,7 @@ import lk.ijse.Apple.Vision.Mobile.Shop.Service.OrderService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -45,8 +49,49 @@ public class OrderServiceImpl implements OrderService {
     public OrderDTO placeOrder(OrderDTO orderDTO) {
         log.info("Execute placeOrder()");
 
-        Customer customer = customerRepository.findById(orderDTO.getCustomerId()).orElse(null);
+        if (orderDTO == null) {
+            throw new CustomException(400, "Order data cannot be null!");
+        }
+        if (orderDTO.getCustomerId() == null) {
+            throw new CustomException(400, "Customer ID cannot be null!");
+        }
+        if (orderDTO.getOrderDetails() == null || orderDTO.getOrderDetails().isEmpty()) {
+            throw new CustomException(400, "Order details cannot be empty!");
+        }
+        if (orderDTO.getTotalAmount() == null || orderDTO.getTotalAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new CustomException(400, "Total amount must be greater than zero!");
+        }
 
+        Customer customer = customerRepository.findById(orderDTO.getCustomerId())
+                .orElseThrow(() -> new CustomException(404, "Customer not found with ID: " + orderDTO.getCustomerId()));
+
+        if (customer.getCustomerStatus() == CustomerStatus.DELETED) {
+            throw new CustomException(400, "Cannot place order for an inactive or deleted customer!");
+        }
+
+        // 1. Stock availability validation (ඕඩර් එක දැමීමට පෙර සියලු භාණ්ඩ වල තොග පරීක්ෂා කිරීම)
+        for (OrderDetailDTO detailDTO : orderDTO.getOrderDetails()) {
+            if (detailDTO.getVariantId() == null) {
+                throw new CustomException(400, "Product variant ID cannot be null!");
+            }
+            if (detailDTO.getQuantity() <= 0) {
+                throw new CustomException(400, "Order quantity must be greater than zero!");
+            }
+
+            Inventory inventory = inventoryRepository.findByProductVariant_VariantId(detailDTO.getVariantId())
+                    .orElseThrow(() -> new CustomException(404, "Inventory not found for variant ID: " + detailDTO.getVariantId()));
+
+            if (inventory.getInventoryStatus() == InventoryStatus.DELETED) {
+                throw new CustomException(400, "Inventory item is inactive for variant ID: " + detailDTO.getVariantId());
+            }
+
+            if (inventory.getQuantity() < detailDTO.getQuantity()) {
+                throw new CustomException(400, "Insufficient stock for variant ID: " + detailDTO.getVariantId()
+                        + ". Available: " + inventory.getQuantity() + ", Requested: " + detailDTO.getQuantity());
+            }
+        }
+
+        // 2. Order setup
         Order order = new Order();
         order.setCustomer(customer);
         order.setTotalAmount(orderDTO.getTotalAmount());
@@ -55,26 +100,21 @@ public class OrderServiceImpl implements OrderService {
 
         List<OrderDetail> detailList = new ArrayList<>();
 
-        if (orderDTO.getOrderDetails() != null) {
-            for (OrderDetailDTO detailDTO : orderDTO.getOrderDetails()) {
-                ProductVariant variant = productVariantRepository.findById(detailDTO.getVariantId()).orElse(null);
+        // 3. Stock අඩු කිරීම සහ OrderDetail සකස් කිරීම
+        for (OrderDetailDTO detailDTO : orderDTO.getOrderDetails()) {
+            ProductVariant variant = productVariantRepository.findById(detailDTO.getVariantId())
+                    .orElseThrow(() -> new CustomException(404, "Product variant not found with ID: " + detailDTO.getVariantId()));
 
-                OrderDetail orderDetail = new OrderDetail();
-                orderDetail.setOrder(order);
-                orderDetail.setProductVariant(variant);
-                orderDetail.setQuantity(detailDTO.getQuantity());
-                orderDetail.setPrice(detailDTO.getPrice());
-                detailList.add(orderDetail);
+            OrderDetail orderDetail = new OrderDetail();
+            orderDetail.setOrder(order);
+            orderDetail.setProductVariant(variant);
+            orderDetail.setQuantity(detailDTO.getQuantity());
+            orderDetail.setPrice(detailDTO.getPrice());
+            detailList.add(orderDetail);
 
-                // Inventory එකෙන් quantity අඩු කිරීම
-                if (detailDTO.getVariantId() != null) {
-                    Inventory inventory = inventoryRepository.findByProductVariant_VariantId(detailDTO.getVariantId()).orElse(null);
-                    if (inventory != null) {
-                        inventory.setQuantity(inventory.getQuantity() - detailDTO.getQuantity());
-                        inventoryRepository.save(inventory);
-                    }
-                }
-            }
+            Inventory inventory = inventoryRepository.findByProductVariant_VariantId(detailDTO.getVariantId()).get();
+            inventory.setQuantity(inventory.getQuantity() - detailDTO.getQuantity());
+            inventoryRepository.save(inventory);
         }
 
         order.setOrderDetail(detailList);
@@ -82,15 +122,13 @@ public class OrderServiceImpl implements OrderService {
         log.info("Order placed successfully with ID: {}", savedOrder.getOrderId());
 
         List<OrderDetailDTO> responseDetailDTOs = new ArrayList<>();
-        if (savedOrder.getOrderDetail() != null) {
-            for (OrderDetail detail : savedOrder.getOrderDetail()) {
-                responseDetailDTOs.add(new OrderDetailDTO(
-                        detail.getOrderDetailId(),
-                        detail.getQuantity(),
-                        detail.getPrice(),
-                        detail.getProductVariant() != null ? detail.getProductVariant().getVariantId() : null
-                ));
-            }
+        for (OrderDetail detail : savedOrder.getOrderDetail()) {
+            responseDetailDTOs.add(new OrderDetailDTO(
+                    detail.getOrderDetailId(),
+                    detail.getQuantity(),
+                    detail.getPrice(),
+                    detail.getProductVariant() != null ? detail.getProductVariant().getVariantId() : null
+            ));
         }
 
         return new OrderDTO(
@@ -98,7 +136,7 @@ public class OrderServiceImpl implements OrderService {
                 savedOrder.getTotalAmount(),
                 savedOrder.getOrderDate(),
                 savedOrder.getOrderStatus(),
-                savedOrder.getCustomer() != null ? savedOrder.getCustomer().getCustomerId() : null,
+                savedOrder.getCustomer().getCustomerId(),
                 responseDetailDTOs
         );
     }
@@ -107,25 +145,34 @@ public class OrderServiceImpl implements OrderService {
     public String cancelOrder(Long orderId) {
         log.info("Execute cancelOrder()");
 
-        Order order = orderRepository.findById(orderId).orElse(null);
-        if (order != null) {
-            order.setOrderStatus(OrderStatus.CANCELLED);
+        if (orderId == null) {
+            throw new CustomException(400, "Order ID cannot be null!");
+        }
 
-            // Cancel කළ විට බඩු නැවත Inventory එකට එකතු කිරීම
-            if (order.getOrderDetail() != null) {
-                for (OrderDetail detail : order.getOrderDetail()) {
-                    if (detail.getProductVariant() != null) {
-                        Inventory inventory = inventoryRepository.findByProductVariant_VariantId(detail.getProductVariant().getVariantId()).orElse(null);
-                        if (inventory != null) {
-                            inventory.setQuantity(inventory.getQuantity() + detail.getQuantity());
-                            inventoryRepository.save(inventory);
-                        }
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new CustomException(404, "Order not found with ID: " + orderId));
+
+        if (order.getOrderStatus() == OrderStatus.CANCELLED) {
+            throw new CustomException(400, "Order is already cancelled!");
+        }
+
+        order.setOrderStatus(OrderStatus.CANCELLED);
+
+        // Cancel කළ විට බඩු නැවත Inventory එකට එකතු කිරීම
+        if (order.getOrderDetail() != null) {
+            for (OrderDetail detail : order.getOrderDetail()) {
+                if (detail.getProductVariant() != null) {
+                    Inventory inventory = inventoryRepository.findByProductVariant_VariantId(detail.getProductVariant().getVariantId()).orElse(null);
+                    if (inventory != null) {
+                        inventory.setQuantity(inventory.getQuantity() + detail.getQuantity());
+                        inventoryRepository.save(inventory);
                     }
                 }
             }
-
-            orderRepository.save(order);
         }
+
+        orderRepository.save(order);
+        log.info("Order cancelled successfully for ID: {}", orderId);
 
         return "Order cancelled successfully!";
     }
@@ -167,9 +214,14 @@ public class OrderServiceImpl implements OrderService {
     public OrderDTO getOrderById(Long orderId) {
         log.info("Execute getOrderById()");
 
-        Order order = orderRepository.findById(orderId).orElse(new Order());
-        List<OrderDetailDTO> detailDTOs = new ArrayList<>();
+        if (orderId == null) {
+            throw new CustomException(400, "Order ID cannot be null!");
+        }
 
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new CustomException(404, "Order not found with ID: " + orderId));
+
+        List<OrderDetailDTO> detailDTOs = new ArrayList<>();
         if (order.getOrderDetail() != null) {
             for (OrderDetail detail : order.getOrderDetail()) {
                 detailDTOs.add(new OrderDetailDTO(
@@ -194,6 +246,14 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public List<OrderDTO> getOrdersByCustomerId(Long customerId) {
         log.info("Execute getOrdersByCustomerId()");
+
+        if (customerId == null) {
+            throw new CustomException(400, "Customer ID cannot be null!");
+        }
+
+        if (!customerRepository.existsById(customerId)) {
+            throw new CustomException(404, "Customer not found with ID: " + customerId);
+        }
 
         List<Order> orderList = orderRepository.findAllByCustomer_CustomerId(customerId);
         List<OrderDTO> responseList = new ArrayList<>();

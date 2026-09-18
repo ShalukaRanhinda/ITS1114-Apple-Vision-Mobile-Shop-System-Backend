@@ -7,6 +7,7 @@ import lk.ijse.Apple.Vision.Mobile.Shop.Entity.User;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.CustomerStatus;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.UserRole;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.UserStatus;
+import lk.ijse.Apple.Vision.Mobile.Shop.Exception.CustomException;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.CustomerRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Repository.UserRepository;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.CustomerService;
@@ -33,16 +34,40 @@ public class CustomerServiceImpl implements CustomerService {
     public CustomerDTO saveCustomer(CustomerDTO customerDTO) {
         log.info("Execute saveCustomer()");
 
+        if (customerDTO == null) {
+            throw new CustomException(400, "Customer data cannot be null!");
+        }
+        if (customerDTO.getFullName() == null || customerDTO.getFullName().trim().isEmpty()) {
+            throw new CustomException(400, "Full name cannot be empty!");
+        }
+        if (customerDTO.getEmail() == null || customerDTO.getEmail().trim().isEmpty()) {
+            throw new CustomException(400, "Email cannot be empty!");
+        }
+        if (customerDTO.getPhoneNumber() == null || customerDTO.getPhoneNumber().trim().isEmpty()) {
+            throw new CustomException(400, "Phone number cannot be empty!");
+        }
+        if (customerDTO.getUserName() == null || customerDTO.getUserName().trim().isEmpty()) {
+            throw new CustomException(400, "Username cannot be empty!");
+        }
+        if (customerDTO.getPassword() == null || customerDTO.getPassword().trim().isEmpty()) {
+            throw new CustomException(400, "Password cannot be empty!");
+        }
+
+        // Username එක දැනටමත් database එකේ තිබේදැයි පරික්ෂා කිරීම
+        if (userRepository.findByUserName(customerDTO.getUserName().trim()).isPresent()) {
+            throw new CustomException(400, "Username already exists: " + customerDTO.getUserName());
+        }
+
         User user = new User();
-        user.setUserName(customerDTO.getUserName());
-        user.setPassword(customerDTO.getPassword());
+        user.setUserName(customerDTO.getUserName().trim());
+        user.setPassword(customerDTO.getPassword().trim());
         user.setRole(UserRole.CUSTOMER);
         user.setUserStatus(UserStatus.ACTIVE);
 
         Customer customer = new Customer();
-        customer.setFullName(customerDTO.getFullName());
-        customer.setEmail(customerDTO.getEmail());
-        customer.setPhoneNumber(customerDTO.getPhoneNumber());
+        customer.setFullName(customerDTO.getFullName().trim());
+        customer.setEmail(customerDTO.getEmail().trim());
+        customer.setPhoneNumber(customerDTO.getPhoneNumber().trim());
         customer.setCustomerStatus(CustomerStatus.ACTIVE);
 
         customer.setUser(user);
@@ -60,30 +85,55 @@ public class CustomerServiceImpl implements CustomerService {
     public CustomerDTO updateCustomer(CustomerDTO customerDTO) {
         log.info("Execute updateCustomer()");
 
-        Customer customer = customerRepository.findById(customerDTO.getCustomerId()).orElse(new Customer());
+        if (customerDTO == null) {
+            throw new CustomException(400, "Customer update data cannot be null!");
+        }
+        if (customerDTO.getCustomerId() == null) {
+            throw new CustomException(400, "Customer ID cannot be null for update!");
+        }
+        if (customerDTO.getFullName() == null || customerDTO.getFullName().trim().isEmpty()) {
+            throw new CustomException(400, "Full name cannot be empty!");
+        }
+        if (customerDTO.getEmail() == null || customerDTO.getEmail().trim().isEmpty()) {
+            throw new CustomException(400, "Email cannot be empty!");
+        }
+        if (customerDTO.getPhoneNumber() == null || customerDTO.getPhoneNumber().trim().isEmpty()) {
+            throw new CustomException(400, "Phone number cannot be empty!");
+        }
 
-        customer.setFullName(customerDTO.getFullName());
-        customer.setEmail(customerDTO.getEmail());
-        customer.setPhoneNumber(customerDTO.getPhoneNumber());
+        Customer customer = customerRepository.findById(customerDTO.getCustomerId())
+                .orElseThrow(() -> new CustomException(404, "Customer not found with ID: " + customerDTO.getCustomerId()));
+
+        if (customer.getCustomerStatus() == CustomerStatus.DELETED) {
+            throw new CustomException(400, "Cannot update a deleted customer!");
+        }
+
+        customer.setFullName(customerDTO.getFullName().trim());
+        customer.setEmail(customerDTO.getEmail().trim());
+        customer.setPhoneNumber(customerDTO.getPhoneNumber().trim());
 
         if (customerDTO.getCustomerStatus() != null) {
             customer.setCustomerStatus(customerDTO.getCustomerStatus());
         }
 
-        // Link වී ඇති User details update කිරීම
+        // Link වී ඇති User details update කිරීම සහ username validation
         if (customer.getUser() != null) {
             User user = customer.getUser();
             if (customerDTO.getUserName() != null && !customerDTO.getUserName().trim().isEmpty()) {
-                user.setUserName(customerDTO.getUserName());
+                String newUserName = customerDTO.getUserName().trim();
+                if (!newUserName.equals(user.getUserName()) && userRepository.findByUserName(newUserName).isPresent()) {
+                    throw new CustomException(400, "Username already exists: " + newUserName);
+                }
+                user.setUserName(newUserName);
             }
             if (customerDTO.getPassword() != null && !customerDTO.getPassword().trim().isEmpty()) {
-                user.setPassword(customerDTO.getPassword());
+                user.setPassword(customerDTO.getPassword().trim());
             }
             userRepository.save(user);
         }
 
         Customer updatedCustomer = customerRepository.save(customer);
-        log.info("Customer updated successfully!");
+        log.info("Customer updated successfully with ID: {}", updatedCustomer.getCustomerId());
 
         CustomerDTO responseDTO = new CustomerDTO();
         responseDTO.setCustomerId(updatedCustomer.getCustomerId());
@@ -104,17 +154,27 @@ public class CustomerServiceImpl implements CustomerService {
     public String deleteCustomer(Long customerId) {
         log.info("Execute deleteCustomer()");
 
-        Customer customer = customerRepository.findById(customerId).orElse(null);
-        if (customer != null) {
-            customer.setCustomerStatus(CustomerStatus.DELETED);
-
-            // User record එකත් soft delete කිරීම
-            if (customer.getUser() != null) {
-                customer.getUser().setUserStatus(UserStatus.DELETED);
-                userRepository.save(customer.getUser());
-            }
-            customerRepository.save(customer);
+        if (customerId == null) {
+            throw new CustomException(400, "Customer ID cannot be null!");
         }
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new CustomException(404, "Customer not found with ID: " + customerId));
+
+        if (customer.getCustomerStatus() == CustomerStatus.DELETED) {
+            throw new CustomException(400, "Customer is already deleted!");
+        }
+
+        customer.setCustomerStatus(CustomerStatus.DELETED);
+
+        // Link වූ User record එකත් soft delete කිරීම
+        if (customer.getUser() != null) {
+            customer.getUser().setUserStatus(UserStatus.DELETED);
+            userRepository.save(customer.getUser());
+        }
+
+        customerRepository.save(customer);
+        log.info("Customer marked as DELETED for ID: {}", customerId);
 
         return "Customer deleted successfully!";
     }
@@ -150,7 +210,16 @@ public class CustomerServiceImpl implements CustomerService {
     public CustomerDTO getCustomerById(Long customerId) {
         log.info("Execute getCustomerById()");
 
-        Customer customer = customerRepository.findById(customerId).orElse(new Customer());
+        if (customerId == null) {
+            throw new CustomException(400, "Customer ID cannot be null!");
+        }
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new CustomException(404, "Customer not found with ID: " + customerId));
+
+        if (customer.getCustomerStatus() == CustomerStatus.DELETED) {
+            throw new CustomException(404, "Customer not found or has been deleted!");
+        }
 
         CustomerDTO customerDTO = new CustomerDTO();
         customerDTO.setCustomerId(customer.getCustomerId());
