@@ -1,7 +1,9 @@
 package lk.ijse.Apple.Vision.Mobile.Shop.Controller;
 
 import lk.ijse.Apple.Vision.Mobile.Shop.Constant.CommonResponse;
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyClaimRequestDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyDTO;
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyValidationResponseDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.Service.WarrantyService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -62,5 +64,17 @@ public class WarrantyController {
     public CommonResponse getWarrantiesByOrder(@PathVariable Long orderId) {
         List<WarrantyDTO> list = warrantyService.getWarrantiesByOrderId(orderId);
         return new CommonResponse(OPERATION_SUCCESS, list, SUCCESS_MESSAGE);
+    }
+    @GetMapping(value = "/validate/{serialNumber}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public CommonResponse validateWarranty(@PathVariable String serialNumber) {
+        WarrantyValidationResponseDTO response = warrantyService.validateWarrantyBySerial(serialNumber);
+        return new CommonResponse(OPERATION_SUCCESS, response, SUCCESS_MESSAGE);
+    }
+
+    @PostMapping(value = "/claimWarranty", produces = MediaType.APPLICATION_JSON_VALUE)
+    public CommonResponse claimWarranty(@RequestBody WarrantyClaimRequestDTO requestDTO) {
+        WarrantyValidationResponseDTO response = warrantyService.claimWarranty(requestDTO);
+        return new CommonResponse(OPERATION_SUCCESS, response, SUCCESS_MESSAGE);
+
     }
 }
