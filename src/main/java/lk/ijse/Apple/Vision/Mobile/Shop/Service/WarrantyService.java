@@ -1,6 +1,9 @@
 package lk.ijse.Apple.Vision.Mobile.Shop.Service;
 
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyClaimRequestDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyDTO;
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyValidationResponseDTO;
+
 import java.util.List;
 
 public interface WarrantyService {
@@ -11,4 +14,8 @@ public interface WarrantyService {
     WarrantyDTO getWarrantyById(Long warrantyId);
     WarrantyDTO getWarrantyBySerialNumber(String serialNumber);
     List<WarrantyDTO> getWarrantiesByOrderId(Long orderId);
+
+    WarrantyValidationResponseDTO validateWarrantyBySerial(String serialNumber);
+
+    WarrantyValidationResponseDTO claimWarranty(WarrantyClaimRequestDTO claimRequestDTO);
 }
