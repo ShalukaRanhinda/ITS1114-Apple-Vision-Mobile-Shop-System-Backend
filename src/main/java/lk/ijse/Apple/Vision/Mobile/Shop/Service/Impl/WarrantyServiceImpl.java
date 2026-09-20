@@ -1,7 +1,9 @@
 package lk.ijse.Apple.Vision.Mobile.Shop.Service.Impl;
 
 import jakarta.transaction.Transactional;
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyClaimRequestDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyDTO;
+import lk.ijse.Apple.Vision.Mobile.Shop.DTO.WarrantyValidationResponseDTO;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Order;
 import lk.ijse.Apple.Vision.Mobile.Shop.Entity.Warranty;
 import lk.ijse.Apple.Vision.Mobile.Shop.Enumeration.OrderStatus;
@@ -13,6 +15,7 @@ import lk.ijse.Apple.Vision.Mobile.Shop.Service.WarrantyService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -261,5 +264,76 @@ public class WarrantyServiceImpl implements WarrantyService {
             responseList.add(dto);
         }
         return responseList;
+    }
+    @Override
+    public WarrantyValidationResponseDTO validateWarrantyBySerial(String serialNumber) {
+        log.info("Execute validateWarrantyBySerial() for SN: {}", serialNumber);
+
+        if (serialNumber == null || serialNumber.trim().isEmpty()) {
+            throw new CustomException(400, "Serial number cannot be empty!");
+        }
+
+        Warranty warranty = warrantyRepository.findBySerialNumber(serialNumber.trim())
+                .orElseThrow(() -> new CustomException(404, "No warranty record registered for serial number: " + serialNumber.trim()));
+
+        LocalDate today = LocalDate.now();
+        long remainingDays = java.time.temporal.ChronoUnit.DAYS.between(today, warranty.getEndDate());
+
+        if (warranty.getWarrantyStatus() == WarrantyStatus.EXPIRED || remainingDays < 0) {
+            if (warranty.getWarrantyStatus() != WarrantyStatus.EXPIRED) {
+                warranty.setWarrantyStatus(WarrantyStatus.EXPIRED);
+                warrantyRepository.save(warranty);
+            }
+            return new WarrantyValidationResponseDTO(
+                    warranty.getWarrantyId(),
+                    warranty.getSerialNumber(),
+                    false,
+                    WarrantyStatus.EXPIRED,
+                    warranty.getStartDate(),
+                    warranty.getEndDate(),
+                    0,
+                    warranty.getOrder() != null ? warranty.getOrder().getOrderId() : null,
+                    warranty.getOrder() != null && warranty.getOrder().getCustomer() != null ? warranty.getOrder().getCustomer().getFullName() : null,
+                    warranty.getOrder() != null && warranty.getOrder().getCustomer() != null ? warranty.getOrder().getCustomer().getPhoneNumber() : null,
+                    "Warranty has expired on " + warranty.getEndDate()
+            );
+        }
+
+        return new WarrantyValidationResponseDTO(
+                warranty.getWarrantyId(),
+                warranty.getSerialNumber(),
+                true,
+                warranty.getWarrantyStatus(),
+                warranty.getStartDate(),
+                warranty.getEndDate(),
+                remainingDays,
+                warranty.getOrder() != null ? warranty.getOrder().getOrderId() : null,
+                warranty.getOrder() != null && warranty.getOrder().getCustomer() != null ? warranty.getOrder().getCustomer().getFullName() : null,
+                warranty.getOrder() != null && warranty.getOrder().getCustomer() != null ? warranty.getOrder().getCustomer().getPhoneNumber() : null,
+                "Warranty is ACTIVE. " + remainingDays + " days remaining."
+        );
+    }
+
+    @Override
+    public WarrantyValidationResponseDTO claimWarranty(WarrantyClaimRequestDTO claimRequestDTO) {
+        log.info("Execute claimWarranty() for SN: {}", claimRequestDTO.getSerialNumber());
+
+        if (claimRequestDTO == null) {
+            throw new CustomException(400, "Claim request data cannot be null!");
+        }
+        if (claimRequestDTO.getClaimReason() == null || claimRequestDTO.getClaimReason().trim().isEmpty()) {
+            throw new CustomException(400, "Claim reason cannot be empty!");
+        }
+
+        WarrantyValidationResponseDTO validation = validateWarrantyBySerial(claimRequestDTO.getSerialNumber());
+
+        if (!validation.isValid()) {
+            throw new CustomException(400, "Cannot process claim! " + validation.getMessage());
+        }
+
+        log.info("Warranty claim approved for Serial: {}. Reason: {}", claimRequestDTO.getSerialNumber(), claimRequestDTO.getClaimReason());
+
+        validation.setMessage("Claim verified successfully! You may proceed with repair/replacement.");
+        return validation;
     }
 }
